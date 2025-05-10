@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "学习强国"
+rootProject.name = "v2rayNG"
 include(":app")
