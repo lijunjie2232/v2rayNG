@@ -9,11 +9,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.v2ray.ang"
+        applicationId = "cn.xuexi.android"
         minSdk = 21
         targetSdk = 35
-        versionCode = 652
-        versionName = "1.10.2"
+        versionCode = 888888
+        versionName = "8.88.88"
         multiDexEnabled = true
 
         val abiFilterList = (properties["ABI_FILTERS"] as? String)?.split(';')
