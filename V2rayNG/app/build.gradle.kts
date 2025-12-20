@@ -12,8 +12,8 @@ android {
         applicationId = "cn.xuexi.android"
         minSdk = 21
         targetSdk = 35
-        versionCode = 88888
-        versionName = "8.88.88"
+        versionCode = 88889
+        versionName = "8.88.89"
         multiDexEnabled = true
 
         val abiFilterList = (properties["ABI_FILTERS"] as? String)?.split(';')
