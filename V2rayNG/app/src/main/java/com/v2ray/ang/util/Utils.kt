@@ -11,7 +11,6 @@ import android.os.LocaleList
 import android.provider.Settings
 import android.text.Editable
 import android.util.Base64
-import android.util.Log
 import android.util.Patterns
 import android.webkit.URLUtil
 import androidx.core.content.ContextCompat
@@ -25,6 +24,8 @@ import java.net.ServerSocket
 import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
@@ -77,7 +78,7 @@ object Utils {
             val cmb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             cmb.primaryClip?.getItemAt(0)?.text.toString()
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to get clipboard content", e)
+            LogUtil.e(AppConfig.TAG, "Failed to get clipboard content", e)
             ""
         }
     }
@@ -94,7 +95,7 @@ object Utils {
             val clipData = ClipData.newPlainText(null, content)
             cmb.setPrimaryClip(clipData)
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to set clipboard content", e)
+            LogUtil.e(AppConfig.TAG, "Failed to set clipboard content", e)
         }
     }
 
@@ -120,12 +121,12 @@ object Utils {
         try {
             return Base64.decode(text, Base64.NO_WRAP).toString(Charsets.UTF_8)
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to decode standard base64", e)
+            LogUtil.e(AppConfig.TAG, "Failed to decode standard base64", e)
         }
         try {
             return Base64.decode(text, Base64.NO_WRAP.or(Base64.URL_SAFE)).toString(Charsets.UTF_8)
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to decode URL-safe base64", e)
+            LogUtil.e(AppConfig.TAG, "Failed to decode URL-safe base64", e)
         }
         return null
     }
@@ -137,7 +138,7 @@ object Utils {
      * @param removePadding
      * @return The base64 encoded string, or an empty string if encoding fails.
      */
-    fun encode(text: String, removePadding : Boolean = false): String {
+    fun encode(text: String, removePadding: Boolean = false): String {
         return try {
             var encoded = Base64.encodeToString(text.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
             if (removePadding) {
@@ -145,7 +146,7 @@ object Utils {
             }
             encoded
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to encode text to base64", e)
+            LogUtil.e(AppConfig.TAG, "Failed to encode text to base64", e)
             ""
         }
     }
@@ -188,7 +189,7 @@ object Utils {
 
             return isIpv6Address(addr)
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to validate IP address", e)
+            LogUtil.e(AppConfig.TAG, "Failed to validate IP address", e)
             return false
         }
     }
@@ -269,7 +270,7 @@ object Utils {
                     Patterns.DOMAIN_NAME.matcher(value).matches() ||
                     URLUtil.isValidUrl(value)
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to validate URL", e)
+            LogUtil.e(AppConfig.TAG, "Failed to validate URL", e)
             false
         }
     }
@@ -285,7 +286,7 @@ object Utils {
             val uri = uriString.toUri()
             context.startActivity(Intent(Intent.ACTION_VIEW, uri))
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to open URI", e)
+            LogUtil.e(AppConfig.TAG, "Failed to open URI", e)
         }
     }
 
@@ -298,7 +299,7 @@ object Utils {
         return try {
             UUID.randomUUID().toString().replace("-", "")
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to generate UUID", e)
+            LogUtil.e(AppConfig.TAG, "Failed to generate UUID", e)
             ""
         }
     }
@@ -313,7 +314,7 @@ object Utils {
         return try {
             URLDecoder.decode(url, Charsets.UTF_8.toString())
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to decode URL", e)
+            LogUtil.e(AppConfig.TAG, "Failed to decode URL", e)
             url
         }
     }
@@ -326,9 +327,44 @@ object Utils {
      */
     fun urlEncode(url: String): String {
         return try {
+            URLEncoder.encode(url, Charsets.UTF_8.toString())
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "Failed to encode URL", e)
+            url
+        }
+    }
+
+    /**
+     * Decode a "encodeURIComponent" string.
+     *
+     * @param url The "encodeURIComponent" string.
+     * @return The decoded string, or the original string if decoding fails.
+     */
+    fun decodeURIComponent(url: String): String {
+        return try {
+            // Decode strictly according to RFC 3986 / encodeURIComponent semantics.
+            // '+' is a literal plus and MUST NOT be interpreted as space.
+            // Inputs using '+' for spaces are non-conforming and rejected deliberately
+            // to avoid cross-language interoperability issues.
+            URLDecoder.decode(url.replace("+", "%2B"), Charsets.UTF_8.toString())
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "Failed to decode encodeURIComponent", e)
+            url
+        }
+    }
+
+    /**
+     * Encode a string to "encodeURIComponent" format.
+     * 
+     * @param url The string to encode.
+     * @return The "encodeURIComponent" encoded string, or the original string if encoding fails.
+     */
+    fun encodeURIComponent(url: String): String {
+        return try {
+            // Replace '+' with '%20' to conform to encodeURIComponent semantics.
             URLEncoder.encode(url, Charsets.UTF_8.toString()).replace("+", "%20")
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to encode URL", e)
+            LogUtil.e(AppConfig.TAG, "Failed to encode encodeURIComponent", e)
             url
         }
     }
@@ -350,7 +386,7 @@ object Utils {
                 }
             }
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to read asset file: $fileName", e)
+            LogUtil.e(AppConfig.TAG, "Failed to read asset file: $fileName", e)
             ""
         }
     }
@@ -368,25 +404,7 @@ object Utils {
             context.getExternalFilesDir(AppConfig.DIR_ASSETS)?.absolutePath
                 ?: context.getDir(AppConfig.DIR_ASSETS, 0).absolutePath
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to get user asset path", e)
-            ""
-        }
-    }
-
-    /**
-     * Get the path to the backup directory.
-     *
-     * @param context The context to use.
-     * @return The path to the backup directory.
-     */
-    fun backupPath(context: Context?): String {
-        if (context == null) return ""
-
-        return try {
-            context.getExternalFilesDir(AppConfig.DIR_BACKUPS)?.absolutePath
-                ?: context.getDir(AppConfig.DIR_BACKUPS, 0).absolutePath
-        } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to get backup path", e)
+            LogUtil.e(AppConfig.TAG, "Failed to get user asset path", e)
             ""
         }
     }
@@ -401,7 +419,7 @@ object Utils {
             val androidId = Settings.Secure.ANDROID_ID.toByteArray(Charsets.UTF_8)
             Base64.encodeToString(androidId.copyOf(32), Base64.NO_PADDING.or(Base64.URL_SAFE))
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to generate device ID", e)
+            LogUtil.e(AppConfig.TAG, "Failed to generate device ID", e)
             ""
         }
     }
@@ -437,11 +455,7 @@ object Utils {
      *
      * @return The system locale.
      */
-    fun getSysLocale(): Locale = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-        LocaleList.getDefault()[0]
-    } else {
-        Locale.getDefault()
-    }
+    fun getSysLocale(): Locale = LocaleList.getDefault().get(0) ?: Locale.getDefault()
 
     /**
      * Fix illegal characters in a URL.
@@ -475,6 +489,16 @@ object Utils {
     }
 
     /**
+     * Find a random free port.
+     *
+     * @return A random free port.
+     * @throws IOException If no free port is found.
+     */
+    fun findRandomFreePort(): Int {
+        return ServerSocket(0).use { it.localPort }
+    }
+
+    /**
      * Check if a string is a valid subscription URL.
      *
      * @param value The string to check.
@@ -497,7 +521,7 @@ object Utils {
                 }
             }
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to validate subscription URL", e)
+            LogUtil.e(AppConfig.TAG, "Failed to validate subscription URL", e)
         }
         return false
     }
@@ -567,9 +591,25 @@ object Utils {
             // Check if they're in the same subnet
             return (ipLong and mask) == (cidrIpLong and mask)
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to check if IP is in CIDR", e)
+            LogUtil.e(AppConfig.TAG, "Failed to check if IP is in CIDR", e)
             return false
         }
     }
-}
 
+    /**
+     * Format a timestamp (milliseconds since epoch) into a date string.
+     * Returns empty string for null or non-positive timestamps.
+     * @param ts timestamp in milliseconds or null
+     * @param pattern SimpleDateFormat pattern, default "yyyy-MM-dd HH:mm"
+     */
+    fun formatTimestamp(ts: Long?, pattern: String = "yyyy-MM-dd HH:mm", locale: Locale = Locale.getDefault()): String {
+        if (ts == null || ts <= 0L) return ""
+        return try {
+            val sdf = SimpleDateFormat(pattern, locale)
+            sdf.format(Date(ts))
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "Failed to format timestamp", e)
+            ""
+        }
+    }
+}

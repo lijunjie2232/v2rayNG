@@ -4,15 +4,22 @@ import android.os.Bundle
 import android.text.TextUtils
 import android.view.Menu
 import android.view.MenuItem
+import android.widget.ArrayAdapter
+import android.widget.AutoCompleteTextView
+import android.widget.ImageButton
 import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.lifecycleScope
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
 import com.v2ray.ang.databinding.ActivitySubEditBinding
-import com.v2ray.ang.dto.SubscriptionItem
+import com.v2ray.ang.dto.entities.SubscriptionItem
+import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.toast
 import com.v2ray.ang.extension.toastSuccess
 import com.v2ray.ang.handler.MmkvManager
+import com.v2ray.ang.handler.SettingsChangeManager
+import com.v2ray.ang.handler.SettingsManager
+import com.v2ray.ang.handler.SubscriptionUpdater
 import com.v2ray.ang.util.Utils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -27,9 +34,11 @@ class SubEditActivity : BaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(binding.root)
-        title = getString(R.string.title_sub_setting)
+        //setContentView(binding.root)
+        setContentViewWithToolbar(binding.root, showHomeAsUp = true, title = getString(R.string.title_sub_setting))
 
+        setupProfileRemarkInputs()
+        SettingsChangeManager.makeSetupGroupTab()
         val subItem = MmkvManager.decodeSubscription(editSubId)
         if (subItem != null) {
             bindingServer(subItem)
@@ -46,9 +55,9 @@ class SubEditActivity : BaseActivity() {
         binding.etUrl.text = Utils.getEditable(subItem.url)
         binding.etUserAgent.text = Utils.getEditable(subItem.userAgent)
         binding.etFilter.text = Utils.getEditable(subItem.filter)
-        binding.etIntelligentSelectionFilter.text = Utils.getEditable(subItem.intelligentSelectionFilter)
         binding.chkEnable.isChecked = subItem.enabled
         binding.autoUpdateCheck.isChecked = subItem.autoUpdate
+        binding.etUpdateInterval.text = Utils.getEditable(subItem.updateInterval.toString())
         binding.allowInsecureUrl.isChecked = subItem.allowInsecureUrl
         binding.etPreProfile.text = Utils.getEditable(subItem.prevProfile)
         binding.etNextProfile.text = Utils.getEditable(subItem.nextProfile)
@@ -62,11 +71,42 @@ class SubEditActivity : BaseActivity() {
         binding.etRemarks.text = null
         binding.etUrl.text = null
         binding.etFilter.text = null
-        binding.etIntelligentSelectionFilter.text = null
         binding.chkEnable.isChecked = true
+        binding.etUpdateInterval.text = null
         binding.etPreProfile.text = null
         binding.etNextProfile.text = null
         return true
+    }
+
+    private fun setupProfileRemarkInputs() {
+        val suggestions = SettingsManager.getProfileRemarks(
+            excludeConfigTypes = setOf(
+                EConfigType.CUSTOM,
+                EConfigType.POLICYGROUP,
+                EConfigType.PROXYCHAIN,
+            )
+        )
+
+        setupProfileRemarkInput(binding.etPreProfile, binding.btnPreProfileDropdown, suggestions)
+        setupProfileRemarkInput(binding.etNextProfile, binding.btnNextProfileDropdown, suggestions)
+    }
+
+    private fun setupProfileRemarkInput(
+        input: AutoCompleteTextView,
+        dropdownButton: ImageButton,
+        suggestions: List<String>
+    ) {
+        val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, suggestions)
+        input.setAdapter(adapter)
+        input.threshold = 0
+
+        dropdownButton.setOnClickListener {
+            input.requestFocus()
+            input.showDropDown()
+        }
+        input.setOnClickListener {
+            input.showDropDown()
+        }
     }
 
     /**
@@ -79,9 +119,29 @@ class SubEditActivity : BaseActivity() {
         subItem.url = binding.etUrl.text.toString()
         subItem.userAgent = binding.etUserAgent.text.toString()
         subItem.filter = binding.etFilter.text.toString()
-        subItem.intelligentSelectionFilter = binding.etIntelligentSelectionFilter.text.toString()
         subItem.enabled = binding.chkEnable.isChecked
         subItem.autoUpdate = binding.autoUpdateCheck.isChecked
+
+        val intervalInput = binding.etUpdateInterval.text.toString().trim()
+        val intervalMinutes = intervalInput.toLongOrNull()
+        if (subItem.autoUpdate) {
+            // autoUpdate is enabled: interval must be valid
+            if (intervalMinutes == null) {
+                // field is empty, reset to default
+                subItem.updateInterval = SubscriptionItem().updateInterval
+            } else if (intervalMinutes < AppConfig.SUBSCRIPTION_MIN_INTERVAL_MINUTES) {
+                toast(R.string.toast_invalid_update_interval)
+                return false
+            } else {
+                subItem.updateInterval = intervalMinutes
+            }
+        } else {
+            // autoUpdate is disabled: save only if the value is valid, otherwise keep the existing value
+            if (intervalMinutes != null && intervalMinutes >= AppConfig.SUBSCRIPTION_MIN_INTERVAL_MINUTES) {
+                subItem.updateInterval = intervalMinutes
+            }
+        }
+
         subItem.prevProfile = binding.etPreProfile.text.toString()
         subItem.nextProfile = binding.etNextProfile.text.toString()
         subItem.allowInsecureUrl = binding.allowInsecureUrl.isChecked
@@ -105,6 +165,7 @@ class SubEditActivity : BaseActivity() {
         }
 
         MmkvManager.encodeSubscription(editSubId, subItem)
+        SubscriptionUpdater.syncOne(subId = editSubId)
         toastSuccess(R.string.toast_success)
         finish()
         return true
@@ -115,11 +176,11 @@ class SubEditActivity : BaseActivity() {
      */
     private fun deleteServer(): Boolean {
         if (editSubId.isNotEmpty()) {
-            if (MmkvManager.decodeSettingsBool(AppConfig.PREF_CONFIRM_REMOVE) == true) {
+            if (MmkvManager.decodeSettingsBool(AppConfig.PREF_CONFIRM_REMOVE)) {
                 AlertDialog.Builder(this).setMessage(R.string.del_config_comfirm)
                     .setPositiveButton(android.R.string.ok) { _, _ ->
                         lifecycleScope.launch(Dispatchers.IO) {
-                            MmkvManager.removeSubscription(editSubId)
+                            SettingsManager.removeSubscriptionWithDefault(editSubId)
                             launch(Dispatchers.Main) {
                                 finish()
                             }
@@ -131,7 +192,7 @@ class SubEditActivity : BaseActivity() {
                     .show()
             } else {
                 lifecycleScope.launch(Dispatchers.IO) {
-                    MmkvManager.removeSubscription(editSubId)
+                    SettingsManager.removeSubscriptionWithDefault(editSubId)
                     launch(Dispatchers.Main) {
                         finish()
                     }
@@ -145,10 +206,6 @@ class SubEditActivity : BaseActivity() {
         menuInflater.inflate(R.menu.action_server, menu)
         del_config = menu.findItem(R.id.del_config)
         save_config = menu.findItem(R.id.save_config)
-
-        if (editSubId.isEmpty()) {
-            del_config?.isVisible = false
-        }
 
         return super.onCreateOptionsMenu(menu)
     }

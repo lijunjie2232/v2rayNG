@@ -20,13 +20,16 @@ import com.v2ray.ang.AppConfig.TLS
 import com.v2ray.ang.AppConfig.WIREGUARD_LOCAL_ADDRESS_V4
 import com.v2ray.ang.AppConfig.WIREGUARD_LOCAL_MTU
 import com.v2ray.ang.R
-import com.v2ray.ang.dto.EConfigType
-import com.v2ray.ang.dto.NetworkType
-import com.v2ray.ang.dto.ProfileItem
+import com.v2ray.ang.dto.entities.ProfileItem
+import com.v2ray.ang.enums.EConfigType
+import com.v2ray.ang.enums.NetworkType
 import com.v2ray.ang.extension.isNotNullEmpty
+import com.v2ray.ang.extension.nullIfBlank
 import com.v2ray.ang.extension.toast
 import com.v2ray.ang.extension.toastSuccess
+import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.MmkvManager
+import com.v2ray.ang.handler.SettingsChangeManager
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.Utils
 
@@ -82,6 +85,9 @@ class ServerActivity : BaseActivity() {
     private val xhttpMode: Array<out String> by lazy {
         resources.getStringArray(R.array.xhttp_mode)
     }
+    private val browserDialerModes: Array<out String> by lazy {
+        resources.getStringArray(R.array.browser_dialer_mode)
+    }
 
 
     // Kotlin synthetics was used, but since it is removed in 1.8. We switch to old manual approach.
@@ -125,29 +131,39 @@ class ServerActivity : BaseActivity() {
     private val et_obfs_password: EditText? by lazy { findViewById(R.id.et_obfs_password) }
     private val et_port_hop: EditText? by lazy { findViewById(R.id.et_port_hop) }
     private val et_port_hop_interval: EditText? by lazy { findViewById(R.id.et_port_hop_interval) }
-    private val et_pinsha256: EditText? by lazy { findViewById(R.id.et_pinsha256) }
     private val et_bandwidth_down: EditText? by lazy { findViewById(R.id.et_bandwidth_down) }
     private val et_bandwidth_up: EditText? by lazy { findViewById(R.id.et_bandwidth_up) }
+    private val et_kcp_mtu: EditText? by lazy { findViewById(R.id.et_kcp_mtu) }
+    private val et_kcp_tti: EditText? by lazy { findViewById(R.id.et_kcp_tti) }
+    private val layout_kcp: LinearLayout? by lazy { findViewById(R.id.layout_kcp) }
     private val et_extra: EditText? by lazy { findViewById(R.id.et_extra) }
+    private val et_fm: EditText? by lazy { findViewById(R.id.et_fm) }
     private val layout_extra: LinearLayout? by lazy { findViewById(R.id.layout_extra) }
+    private val et_ech_config_list: EditText? by lazy { findViewById(R.id.et_ech_config_list) }
+    private val container_ech_config_list: LinearLayout? by lazy { findViewById(R.id.lay_ech_config_list) }
+    private val et_pinned_ca256: EditText? by lazy { findViewById(R.id.et_pinned_ca256) }
+    private val container_pinned_ca256: LinearLayout? by lazy { findViewById(R.id.lay_pinned_ca256) }
+    private val layout_browser_dialer: LinearLayout? by lazy { findViewById(R.id.layout_browser_dialer) }
+    private val sp_browser_dialer_mode: Spinner? by lazy { findViewById(R.id.sp_browser_dialer_mode) }
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = getString(R.string.title_server)
 
         val config = MmkvManager.decodeServerConfig(editGuid)
-        when (config?.configType ?: createConfigType) {
-            EConfigType.VMESS -> setContentView(R.layout.activity_server_vmess)
-            EConfigType.CUSTOM -> return
-            EConfigType.SHADOWSOCKS -> setContentView(R.layout.activity_server_shadowsocks)
-            EConfigType.SOCKS -> setContentView(R.layout.activity_server_socks)
-            EConfigType.HTTP -> setContentView(R.layout.activity_server_socks)
-            EConfigType.VLESS -> setContentView(R.layout.activity_server_vless)
-            EConfigType.TROJAN -> setContentView(R.layout.activity_server_trojan)
-            EConfigType.WIREGUARD -> setContentView(R.layout.activity_server_wireguard)
-            EConfigType.HYSTERIA2 -> setContentView(R.layout.activity_server_hysteria2)
-        }
+
+        val layoutId = when (config?.configType ?: createConfigType) {
+            EConfigType.VMESS -> R.layout.activity_server_vmess
+            EConfigType.SHADOWSOCKS -> R.layout.activity_server_shadowsocks
+            EConfigType.SOCKS, EConfigType.HTTP -> R.layout.activity_server_socks
+            EConfigType.VLESS -> R.layout.activity_server_vless
+            EConfigType.TROJAN -> R.layout.activity_server_trojan
+            EConfigType.WIREGUARD -> R.layout.activity_server_wireguard
+            EConfigType.HYSTERIA2 -> R.layout.activity_server_hysteria2
+            else -> null
+        } ?: return
+        setContentViewWithToolbar(layoutId, showHomeAsUp = true, title = (config?.configType ?: createConfigType).toString())
+
         sp_network?.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(
                 parent: AdapterView<*>?,
@@ -229,9 +245,25 @@ class ServerActivity : BaseActivity() {
                         else -> null
                     }.orEmpty()
                 )
+                et_fm?.text = Utils.getEditable(config?.finalMask)
+
+                layout_kcp?.visibility =
+                    when (networks[position]) {
+                        NetworkType.KCP.type -> View.VISIBLE
+                        else -> View.GONE
+                    }
+                et_kcp_mtu?.text = Utils.getEditable(config?.kcpMtu?.toString().orEmpty())
+                et_kcp_tti?.text = Utils.getEditable(config?.kcpTti?.toString().orEmpty())
 
                 layout_extra?.visibility =
                     when (networks[position]) {
+                        NetworkType.XHTTP.type -> View.VISIBLE
+                        else -> View.GONE
+                    }
+
+                layout_browser_dialer?.visibility =
+                    when (networks[position]) {
+                        NetworkType.WS.type -> View.VISIBLE
                         NetworkType.XHTTP.type -> View.VISIBLE
                         else -> View.GONE
                     }
@@ -262,7 +294,9 @@ class ServerActivity : BaseActivity() {
                             container_public_key,
                             container_short_id,
                             container_spider_x,
-                            container_mldsa65_verify
+                            container_mldsa65_verify,
+                            container_ech_config_list,
+                            container_pinned_ca256
                         ).forEach { it?.visibility = View.GONE }
                     }
 
@@ -271,9 +305,11 @@ class ServerActivity : BaseActivity() {
                         listOf(
                             container_sni,
                             container_fingerprint,
-                            container_alpn
+                            container_alpn,
+                            container_allow_insecure,
+                            container_ech_config_list,
+                            container_pinned_ca256
                         ).forEach { it?.visibility = View.VISIBLE }
-                        container_allow_insecure?.visibility = View.VISIBLE
                         listOf(
                             container_public_key,
                             container_short_id,
@@ -284,11 +320,16 @@ class ServerActivity : BaseActivity() {
 
                     // Case 3: Other reality values
                     else -> {
-                        listOf(container_sni, container_fingerprint).forEach {
-                            it?.visibility = View.VISIBLE
-                        }
-                        container_alpn?.visibility = View.GONE
-                        container_allow_insecure?.visibility = View.GONE
+                        listOf(
+                            container_sni,
+                            container_fingerprint
+                        ).forEach { it?.visibility = View.VISIBLE }
+                        listOf(
+                            container_alpn,
+                            container_allow_insecure,
+                            container_ech_config_list,
+                            container_pinned_ca256
+                        ).forEach { it?.visibility = View.GONE }
                         listOf(
                             container_public_key,
                             container_short_id,
@@ -342,7 +383,6 @@ class ServerActivity : BaseActivity() {
             et_obfs_password?.text = Utils.getEditable(config.obfsPassword)
             et_port_hop?.text = Utils.getEditable(config.portHopping)
             et_port_hop_interval?.text = Utils.getEditable(config.portHoppingInterval)
-            et_pinsha256?.text = Utils.getEditable(config.pinSHA256)
             et_bandwidth_down?.text = Utils.getEditable(config.bandwidthDown)
             et_bandwidth_up?.text = Utils.getEditable(config.bandwidthUp)
         }
@@ -356,10 +396,6 @@ class ServerActivity : BaseActivity() {
         val streamSecurity = Utils.arrayFind(streamSecuritys, config.security.orEmpty())
         if (streamSecurity >= 0) {
             sp_stream_security?.setSelection(streamSecurity)
-            container_sni?.visibility = View.VISIBLE
-            container_fingerprint?.visibility = View.VISIBLE
-            container_alpn?.visibility = View.VISIBLE
-
             et_sni?.text = Utils.getEditable(config.sni)
             config.fingerPrint?.let { it ->
                 val utlsIndex = Utils.arrayFind(uTlsItems, it)
@@ -370,46 +406,30 @@ class ServerActivity : BaseActivity() {
                 alpnIndex.let { sp_stream_alpn?.setSelection(if (it >= 0) it else 0) }
             }
             if (config.security == TLS) {
-                container_allow_insecure?.visibility = View.VISIBLE
                 val allowinsecure = Utils.arrayFind(allowinsecures, config.insecure.toString())
                 if (allowinsecure >= 0) {
                     sp_allow_insecure?.setSelection(allowinsecure)
                 }
-                listOf(
-                    container_public_key,
-                    container_short_id,
-                    container_spider_x,
-                    container_mldsa65_verify
-                ).forEach { it?.visibility = View.GONE }
+                et_ech_config_list?.text = Utils.getEditable(config.echConfigList)
+                et_pinned_ca256?.text = Utils.getEditable(config.pinnedCA256)
             } else if (config.security == REALITY) {
-                container_public_key?.visibility = View.VISIBLE
                 et_public_key?.text = Utils.getEditable(config.publicKey.orEmpty())
-                container_short_id?.visibility = View.VISIBLE
                 et_short_id?.text = Utils.getEditable(config.shortId.orEmpty())
-                container_spider_x?.visibility = View.VISIBLE
                 et_spider_x?.text = Utils.getEditable(config.spiderX.orEmpty())
-                container_mldsa65_verify?.visibility = View.VISIBLE
                 et_mldsa65_verify?.text = Utils.getEditable(config.mldsa65Verify.orEmpty())
-                container_allow_insecure?.visibility = View.GONE
             }
         }
 
-        if (config.security.isNullOrEmpty()) {
-            listOf(
-                container_sni,
-                container_fingerprint,
-                container_alpn,
-                container_allow_insecure,
-                container_public_key,
-                container_short_id,
-                container_spider_x,
-                container_mldsa65_verify
-            ).forEach { it?.visibility = View.GONE }
-        }
         val network = Utils.arrayFind(networks, config.network.orEmpty())
         if (network >= 0) {
             sp_network?.setSelection(network)
         }
+
+        val browserDialerMode = Utils.arrayFind(browserDialerModes, config.browserDialerMode.orEmpty())
+        if (browserDialerMode >= 0) {
+            sp_browser_dialer_mode?.setSelection(browserDialerMode)
+        }
+
         return true
     }
 
@@ -438,6 +458,7 @@ class ServerActivity : BaseActivity() {
         et_local_address?.text =
             Utils.getEditable(WIREGUARD_LOCAL_ADDRESS_V4)
         et_local_mtu?.text = Utils.getEditable(WIREGUARD_LOCAL_MTU)
+        sp_browser_dialer_mode?.setSelection(0)
         return true
     }
 
@@ -488,15 +509,27 @@ class ServerActivity : BaseActivity() {
             }
         }
 
+        if (et_fm?.text?.toString().isNotNullEmpty()) {
+            if (JsonUtil.parseString(et_fm?.text?.toString()) == null) {
+                toast(R.string.server_lab_final_mask)
+                return false
+            }
+        }
+
         saveCommon(config)
         saveStreamSettings(config)
         saveTls(config)
 
+        config.description = AngConfigManager.generateDescription(config)
+
         if (config.subscriptionId.isEmpty() && !subscriptionId.isNullOrEmpty()) {
             config.subscriptionId = subscriptionId.orEmpty()
         }
-        //Log.i(AppConfig.TAG, JsonUtil.toJsonPretty(config) ?: "")
+        //LogUtil.i(AppConfig.TAG, JsonUtil.toJsonPretty(config) ?: "")
         MmkvManager.encodeServerConfig(editGuid, config)
+        if (isRunning) {
+            SettingsChangeManager.makeRestartService()
+        }
         toastSuccess(R.string.toast_success)
         finish()
         return true
@@ -530,8 +563,7 @@ class ServerActivity : BaseActivity() {
         } else if (config.configType == EConfigType.HYSTERIA2) {
             config.obfsPassword = et_obfs_password?.text?.toString()
             config.portHopping = et_port_hop?.text?.toString()
-            config.portHoppingInterval = et_port_hop_interval?.text?.toString()
-            config.pinSHA256 = et_pinsha256?.text?.toString()
+            config.portHoppingInterval = et_port_hop_interval?.text?.toString()?.trim()
             config.bandwidthDown = et_bandwidth_down?.text?.toString()
             config.bandwidthUp = et_bandwidth_up?.text?.toString()
         }
@@ -555,7 +587,20 @@ class ServerActivity : BaseActivity() {
         profileItem.serviceName = path
         profileItem.authority = requestHost
         profileItem.xhttpMode = transportTypes(networks[network])[type]
-        profileItem.xhttpExtra = et_extra?.text?.toString()?.trim()
+        profileItem.xhttpExtra = et_extra?.text?.toString()?.trim().nullIfBlank()
+        profileItem.finalMask = et_fm?.text?.toString()?.trim()?.nullIfBlank()
+        profileItem.kcpMtu = et_kcp_mtu?.text?.toString()?.toIntOrNull()
+        profileItem.kcpTti = et_kcp_tti?.text?.toString()?.toIntOrNull()
+        if (networks[network] == NetworkType.WS.type || networks[network] == NetworkType.XHTTP.type) {
+            val browserDialerMode = browserDialerModes[sp_browser_dialer_mode?.selectedItemPosition ?: 0]
+            if (browserDialerMode != browserDialerModes[0]) {
+                profileItem.browserDialerMode = browserDialerMode
+            } else {
+                profileItem.browserDialerMode = null
+            }
+        } else {
+            profileItem.browserDialerMode = null
+        }
     }
 
     private fun saveTls(config: ProfileItem) {
@@ -568,6 +613,8 @@ class ServerActivity : BaseActivity() {
         val shortId = et_short_id?.text?.toString()
         val spiderX = et_spider_x?.text?.toString()
         val mldsa65Verify = et_mldsa65_verify?.text?.toString()
+        val echConfigList = et_ech_config_list?.text?.toString()
+        val pinnedCA256 = et_pinned_ca256?.text?.toString()
 
         val allowInsecure =
             if (allowInsecureField == null || allowinsecures[allowInsecureField].isBlank()) {
@@ -585,6 +632,8 @@ class ServerActivity : BaseActivity() {
         config.shortId = shortId
         config.spiderX = spiderX
         config.mldsa65Verify = mldsa65Verify
+        config.echConfigList = echConfigList
+        config.pinnedCA256 = pinnedCA256
     }
 
     private fun transportTypes(network: String?): Array<out String> {
@@ -617,7 +666,7 @@ class ServerActivity : BaseActivity() {
     private fun deleteServer(): Boolean {
         if (editGuid.isNotEmpty()) {
             if (editGuid != MmkvManager.getSelectServer()) {
-                if (MmkvManager.decodeSettingsBool(AppConfig.PREF_CONFIRM_REMOVE) == true) {
+                if (MmkvManager.decodeSettingsBool(AppConfig.PREF_CONFIRM_REMOVE)) {
                     AlertDialog.Builder(this).setMessage(R.string.del_config_comfirm)
                         .setPositiveButton(android.R.string.ok) { _, _ ->
                             MmkvManager.removeServer(editGuid)
@@ -632,7 +681,7 @@ class ServerActivity : BaseActivity() {
                     finish()
                 }
             } else {
-                application.toast(R.string.toast_action_not_allowed)
+                toast(R.string.toast_action_not_allowed)
             }
         }
         return true
@@ -640,17 +689,9 @@ class ServerActivity : BaseActivity() {
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.action_server, menu)
-        val delButton = menu.findItem(R.id.del_config)
-        val saveButton = menu.findItem(R.id.save_config)
 
-        if (editGuid.isNotEmpty()) {
-            if (isRunning) {
-                delButton?.isVisible = false
-                saveButton?.isVisible = false
-            }
-        } else {
-            delButton?.isVisible = false
-        }
+        val delButton = menu.findItem(R.id.del_config)
+        delButton?.isVisible = editGuid.isNotEmpty() && !isRunning
 
         return super.onCreateOptionsMenu(menu)
     }

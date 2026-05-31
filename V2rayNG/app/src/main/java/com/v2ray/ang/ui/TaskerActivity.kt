@@ -3,7 +3,6 @@ package com.v2ray.ang.ui
 import android.content.Intent
 import android.os.Bundle
 import android.text.TextUtils
-import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -13,6 +12,7 @@ import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
 import com.v2ray.ang.databinding.ActivityTaskerBinding
 import com.v2ray.ang.handler.MmkvManager
+import com.v2ray.ang.util.LogUtil
 
 class TaskerActivity : BaseActivity() {
     private val binding by lazy { ActivityTaskerBinding.inflate(layoutInflater) }
@@ -23,13 +23,14 @@ class TaskerActivity : BaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(binding.root)
+        //setContentView(binding.root)
+        setContentViewWithToolbar(binding.root, showHomeAsUp = true, title = "")
 
         //add def value
         lstData.add("Default")
         lstGuid.add(AppConfig.TASKER_DEFAULT_GUID)
 
-        MmkvManager.decodeServerList().forEach { key ->
+        MmkvManager.decodeAllServerList().forEach { key ->
             MmkvManager.decodeServerConfig(key)?.let { config ->
                 lstData.add(config.remarks)
                 lstGuid.add(key)
@@ -61,7 +62,7 @@ class TaskerActivity : BaseActivity() {
                 }
             }
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to initialize Tasker settings", e)
+            LogUtil.e(AppConfig.TAG, "Failed to initialize Tasker settings", e)
 
         }
     }
@@ -92,8 +93,8 @@ class TaskerActivity : BaseActivity() {
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.action_server, menu)
-        val del_config = menu.findItem(R.id.del_config)
-        del_config?.isVisible = false
+        val delConfig = menu.findItem(R.id.del_config)
+        delConfig?.isVisible = false
         return super.onCreateOptionsMenu(menu)
     }
 

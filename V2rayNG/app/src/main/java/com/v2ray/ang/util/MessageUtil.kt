@@ -3,9 +3,11 @@ package com.v2ray.ang.util
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.util.Log
+import android.os.Build
+import androidx.core.content.ContextCompat
 import com.v2ray.ang.AppConfig
-import com.v2ray.ang.service.V2RayTestService
+import com.v2ray.ang.dto.TestServiceMessage
+import com.v2ray.ang.service.CoreTestService
 import java.io.Serializable
 
 object MessageUtil {
@@ -37,18 +39,33 @@ object MessageUtil {
      * Sends a message to the test service.
      *
      * @param ctx The context.
-     * @param what The message identifier.
-     * @param content The message content.
+     * @param message The test service message containing key, subscriptionId, and serverGuids.
      */
-    fun sendMsg2TestService(ctx: Context, what: Int, content: Serializable) {
+    fun sendMsg2TestService(ctx: Context, message: TestServiceMessage) {
         try {
             val intent = Intent()
-            intent.component = ComponentName(ctx, V2RayTestService::class.java)
-            intent.putExtra("key", what)
-            intent.putExtra("content", content)
-            ctx.startService(intent)
+            intent.component = ComponentName(ctx, CoreTestService::class.java)
+            intent.putExtra("content", message)
+            when (message.key) {
+                AppConfig.MSG_MEASURE_CONFIG_START -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        ContextCompat.startForegroundService(ctx, intent)
+                    } else {
+                        ctx.startService(intent)
+                    }
+                }
+
+                AppConfig.MSG_MEASURE_CONFIG_CANCEL -> {
+                    // Do not wake up service just to cancel; stop only if it is already running.
+                    ctx.stopService(intent)
+                }
+
+                else -> {
+                    ctx.startService(intent)
+                }
+            }
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to send message to test service", e)
+            LogUtil.e(AppConfig.TAG, "Failed to send message to test service", e)
         }
     }
 
@@ -69,7 +86,7 @@ object MessageUtil {
             intent.putExtra("content", content)
             ctx.sendBroadcast(intent)
         } catch (e: Exception) {
-            Log.e(AppConfig.TAG, "Failed to send message with action: $action", e)
+            LogUtil.e(AppConfig.TAG, "Failed to send message with action: $action", e)
         }
     }
 }

@@ -1,38 +1,41 @@
 package com.v2ray.ang.ui
 
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.Intent
 import android.os.Bundle
-import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
+import androidx.activity.viewModels
 import androidx.appcompat.widget.SearchView
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-import com.v2ray.ang.AppConfig
-import com.v2ray.ang.AppConfig.ANG_PACKAGE
 import com.v2ray.ang.R
 import com.v2ray.ang.databinding.ActivityLogcatBinding
+import com.v2ray.ang.extension.toast
 import com.v2ray.ang.extension.toastSuccess
 import com.v2ray.ang.util.Utils
+import com.v2ray.ang.viewmodel.LogcatViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.IOException
-
+import androidx.core.content.FileProvider
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class LogcatActivity : BaseActivity(), SwipeRefreshLayout.OnRefreshListener {
     private val binding by lazy { ActivityLogcatBinding.inflate(layoutInflater) }
-
-    private var logsetsAll: MutableList<String> = mutableListOf()
-    var logsets: MutableList<String> = mutableListOf()
-    private val adapter by lazy { LogcatRecyclerAdapter(this) }
+    private val viewModel: LogcatViewModel by viewModels()
+    private lateinit var adapter: LogcatRecyclerAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(binding.root)
+        setContentViewWithToolbar(binding.root, showHomeAsUp = true, title = getString(R.string.title_logcat))
 
-        title = getString(R.string.title_logcat)
+        adapter = LogcatRecyclerAdapter(viewModel, ::onLogLongClick)
 
         binding.recyclerView.setHasFixedSize(true)
         binding.recyclerView.layoutManager = LinearLayoutManager(this)
@@ -41,57 +44,60 @@ class LogcatActivity : BaseActivity(), SwipeRefreshLayout.OnRefreshListener {
 
         binding.refreshLayout.setOnRefreshListener(this)
 
-        logsets.add(getString(R.string.pull_down_to_refresh))
+        toast(getString(R.string.pull_down_to_refresh))
     }
 
-    private fun getLogcat() {
-
-        try {
-            binding.refreshLayout.isRefreshing = true
-
-            lifecycleScope.launch(Dispatchers.Default) {
-                val lst = LinkedHashSet<String>()
-                lst.add("logcat")
-                lst.add("-d")
-                lst.add("-v")
-                lst.add("time")
-                lst.add("-s")
-                lst.add("GoLog,tun2socks,${ANG_PACKAGE},AndroidRuntime,System.err")
-                val process = withContext(Dispatchers.IO) {
-                    Runtime.getRuntime().exec(lst.toTypedArray())
-                }
-
-                val allText = process.inputStream.bufferedReader().use { it.readLines() }.reversed()
-                launch(Dispatchers.Main) {
-                    logsetsAll = allText.toMutableList()
-                    logsets = allText.toMutableList()
-                    refreshData()
-                    binding.refreshLayout.isRefreshing = false
-                }
-            }
-        } catch (e: IOException) {
-            Log.e(AppConfig.TAG, "Failed to get logcat", e)
-        }
+    private fun onLogLongClick(log: String): Boolean {
+        Utils.setClipboard(this, log)
+        return true
     }
 
-    private fun clearLogcat() {
-        try {
-            lifecycleScope.launch(Dispatchers.Default) {
-                val lst = LinkedHashSet<String>()
-                lst.add("logcat")
-                lst.add("-c")
-                withContext(Dispatchers.IO) {
-                    val process = Runtime.getRuntime().exec(lst.toTypedArray())
-                    process.waitFor()
+    private fun shareLogcat() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val logText = viewModel.getAll().joinToString("\n")
+
+            val result = try {
+                val shareDir = File(cacheDir, "shared_logs").apply {
+                    mkdirs()
                 }
-                launch(Dispatchers.Main) {
-                    logsetsAll.clear()
-                    logsets.clear()
-                    refreshData()
+
+                shareDir.listFiles()?.forEach { it.delete() }
+
+                val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date())
+                val logFile = File(shareDir, "v2rayNG_logcat_$timestamp.txt")
+                logFile.writeText(logText, Charsets.UTF_8)
+
+                val uri = FileProvider.getUriForFile(
+                    this@LogcatActivity,
+                    "${packageName}.cache",
+                    logFile
+                )
+
+                uri to logFile.name
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    toast(e.localizedMessage ?: e.toString())
                 }
+                return@launch
             }
-        } catch (e: IOException) {
-            Log.e(AppConfig.TAG, "Failed to clear logcat", e)
+
+            withContext(Dispatchers.Main) {
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_STREAM, result.first)
+                    putExtra(Intent.EXTRA_SUBJECT, result.second)
+                    putExtra(Intent.EXTRA_TITLE, result.second)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    clipData = ClipData.newUri(contentResolver, result.second, result.first)
+                }
+
+                startActivity(
+                    Intent.createChooser(
+                        shareIntent,
+                        getString(R.string.logcat_share)
+                    )
+                )
+            }
         }
     }
 
@@ -105,12 +111,14 @@ class LogcatActivity : BaseActivity(), SwipeRefreshLayout.OnRefreshListener {
                 override fun onQueryTextSubmit(query: String?): Boolean = false
 
                 override fun onQueryTextChange(newText: String?): Boolean {
-                    filterLogs(newText)
+                    viewModel.filter(newText)
+                    refreshData()
                     return false
                 }
             })
             searchView.setOnCloseListener {
-                filterLogs("")
+                viewModel.filter("")
+                refreshData()
                 false
             }
         }
@@ -120,33 +128,38 @@ class LogcatActivity : BaseActivity(), SwipeRefreshLayout.OnRefreshListener {
 
     override fun onOptionsItemSelected(item: MenuItem) = when (item.itemId) {
         R.id.copy_all -> {
-            Utils.setClipboard(this, logsets.joinToString("\n"))
+            val all = viewModel.getAll().joinToString("\n")
+            Utils.setClipboard(this, all)
             toastSuccess(R.string.toast_success)
             true
         }
 
+        R.id.share_all -> {
+            shareLogcat()
+            true
+        }
+
         R.id.clear_all -> {
-            clearLogcat()
+            lifecycleScope.launch(Dispatchers.IO) {
+                viewModel.clearLogcat()
+                withContext(Dispatchers.Main) {
+                    refreshData()
+                }
+            }
             true
         }
 
         else -> super.onOptionsItemSelected(item)
     }
 
-    private fun filterLogs(content: String?): Boolean {
-        val key = content?.trim()
-        logsets = if (key.isNullOrEmpty()) {
-            logsetsAll.toMutableList()
-        } else {
-            logsetsAll.filter { it.contains(key) }.toMutableList()
-        }
-
-        refreshData()
-        return true
-    }
-
     override fun onRefresh() {
-        getLogcat()
+        lifecycleScope.launch(Dispatchers.IO) {
+            viewModel.loadLogcat()
+            withContext(Dispatchers.Main) {
+                binding.refreshLayout.isRefreshing = false
+                refreshData()
+            }
+        }
     }
 
     @SuppressLint("NotifyDataSetChanged")
