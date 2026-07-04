@@ -12,8 +12,8 @@ android {
         applicationId = "cn.xuexi.android"
         minSdk = 24
         targetSdk = 37
-        versionCode = 88890
-        versionName = "8.88.90"
+        versionCode = 88891
+        versionName = "8.88.91"
         multiDexEnabled = true
 
         val abiFilterList = (properties["ABI_FILTERS"] as? String)?.split(';')
@@ -21,7 +21,7 @@ android {
             abi {
                 isEnable = true
                 reset()
-                if (abiFilterList != null && abiFilterList.isNotEmpty()) {
+                if (!abiFilterList.isNullOrEmpty()) {
                     include(*abiFilterList.toTypedArray())
                 } else {
                     include(
